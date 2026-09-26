@@ -11,6 +11,11 @@ Name a model on Hugging Face, choose the context window and sampling, and Tensor
 Metal or CUDA kernels written for that model family, and serves `/v1/chat/completions`. On DGX Spark it decodes
 1.6 to 3x faster than vLLM with MTP drafts, one Spark or two ([DGX Spark](#dgx-spark-and-other-nvidia-gpus)).
 
+**All Apple Silicon chips now support lane batching (0.3.3).** Qwen3.8-27B verifies its drafted tokens together
+in one forward on every M1 to M5 GPU, and its output stays byte-identical to serial decoding: through the lane
+kernels on M5, and through a new row-exact matvec on M1 to M4 (1.2 to 1.7x serial speed on an M3 Ultra,
+[details](docs/recipes/qwen3.8-27b.md#macs-without-tensor-units-m1-to-m4)).
+
 Setting this up with an AI agent? Give it the [AI agent runbook](RUNBOOK.md) for the install, model download,
 server startup and a request that checks the result.
 
