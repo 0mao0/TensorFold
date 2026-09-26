@@ -116,6 +116,19 @@ response has a `choices` array; reasoning, when enabled, may appear separately f
 Point an OpenAI-compatible client at `http://127.0.0.1:8080/v1` and use that same model ID. See the
 [API notes](docs/api.md) for request fields and response details.
 
+## Updating
+
+`tensorfold serve` prints a line when a newer release is out. To install it:
+
+```bash
+tensorfold update            # or: tensorfold update --check, to only look
+```
+
+Restart the server afterwards. On a DGX Spark, a container started with `docker run --rm` loses anything
+installed in it when it stops, so either run `pip install git+https://github.com/ashhart/TensorFold.git` again
+in each new container, or keep a named container (`docker run --name tensorfold ...`, then `docker start -ai
+tensorfold`) and run `tensorfold update` inside it.
+
 ## Your own model
 
 TensorFold is built and tested with the checkpoints above (`tensorfold models` lists them). For anything else:

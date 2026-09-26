@@ -170,7 +170,13 @@ tensorfold serve MODEL [options]    # MODEL: a Hugging Face repo id or a model d
 tensorfold pull REPO [REPO ...]      # download models or draft models
 tensorfold models                   # families and the checkpoints they are tested with
 tensorfold info MODEL               # which family serves a model (reads its config.json only)
+tensorfold update                   # install the newest release from GitHub (--check: only say if there is one)
 ```
+
+As it starts, `serve` asks GitHub whether a newer release exists (one request to api.github.com a day, with nothing
+about you or your models in it) and prints a line if there is one; the server starts either way. `tensorfold
+update` installs it with the same Python's pip and leaves MLX and PyTorch as they are unless the release needs
+other versions. `--no-update-check` or `TENSORFOLD_NO_UPDATE_CHECK=1` switches the check off.
 
 | Option | Default | What it does |
 | --- | --- | --- |
@@ -187,6 +193,7 @@ tensorfold info MODEL               # which family serves a model (reads its con
 | `--no-drafts` | off | one token a round: the serial reference |
 | `--drafter` | `auto` | the family's draft model once pulled; a repo id or directory; or `none` |
 | `--mtp-drafts N` | 3 (6 on CUDA) | most MTP drafts a round (Qwen3.8 Flash Next; on CUDA the chain also stops under 30% confidence); 0 turns MTP drafts off |
+| `--no-update-check` | off | don't ask GitHub for a newer release at start |
 | `--prompt-cache-gib` | an eighth of RAM, at most 16 | memory for cached conversation prefixes |
 | `--snapshot-dir` | `~/.cache/tensorfold/prefix-snapshots` | system blocks and conversations kept across restarts |
 

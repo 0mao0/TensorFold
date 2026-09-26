@@ -64,6 +64,7 @@ def test_unknown_model_types_point_to_the_recipe_book(tmp_path):
 def test_serve_refuses_an_unreadable_checkpoint_before_downloading(tmp_path, capsys, monkeypatch):
     (tmp_path / "config.json").write_text(json.dumps(EXL3))
     monkeypatch.setattr(cli.sys, "platform", "linux")
+    monkeypatch.setenv("TENSORFOLD_NO_UPDATE_CHECK", "1")        # no request to GitHub from a test
     assert cli.main(["serve", str(tmp_path), "--tp", "2", "--rank", "0", "--master", "10.1.1.1"]) == 1
     err = capsys.readouterr().err
     assert "exl3" in err and "recipe book" in err
