@@ -61,9 +61,10 @@ What each checkpoint needs:
   groups of 32. Use the `-MLX-4bit-MTP` conversion. TensorFold refuses other bit widths before downloading
   anything, and a conversion without the MTP head runs without drafts.
 - Qwen3.8-27B drafts with the DFlash2 draft model once it has been pulled; `serve` picks it up automatically.
-  Its lane kernels need 4-bit weights in groups of 64 and Metal 4 tensor units (M5-generation GPUs). Elsewhere
-  it runs on MLX's own kernels: every token is still the model's own sample, but drafted rows are checked at
-  width rather than bit-identical to one-row decoding.
+  Its lane kernels need 4-bit weights in groups of 64 and Metal 4 tensor units (M5-generation GPUs). On M1 to
+  M4 GPUs, drafted windows of up to 8 rows go through TensorFold's row-exact matvec instead, so drafted output
+  is still byte-identical to serial decoding. Each round drafts as many tokens as pay at the request's
+  acceptance.
 - Nemotron 3.5 Lightning drafts with its MTP head, which the checkpoint above ships as `mtp-4bit.safetensors`
   (converted from NVIDIA's BF16 release; the standard MLX conversion drops it), and from the context.
   `pull` checks for the head, and `serve` completes an older cache that lacks it before loading.
@@ -88,6 +89,8 @@ drafts, which are now on by default; in-engine they reached 217 tok/s on prose a
 | | | about 60k-token context | 162 |
 | Qwen3.8-27B, 4-bit, DFlash2 drafter | M5 Max, 128 GB | short answer with thinking | 120-124 (27 without drafts) |
 | | | code | 189 (26 without drafts) |
+| | M3 Ultra, 256 GB | code, 64 tokens | 64 (38-39 without drafts) |
+| | | chat, 64 tokens | 47-52 (38-39 without drafts) |
 | Qwen3.8 Flash Next, 4-bit | M3 Ultra, 256 GB | short answer with thinking | 105-107 (79 without drafts) |
 | | | code | 112 (80 without drafts) |
 | | | file edit | 190 |
