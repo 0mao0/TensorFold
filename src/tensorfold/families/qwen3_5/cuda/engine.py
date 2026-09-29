@@ -20,6 +20,8 @@ def entry_end(prompt: Sequence[int]) -> int:
 class Qwen27Engine:
     """Qwen3.8-27B on one GPU or two ranks (rank 0 here), DFlash2 drafting, prefix reuse."""
 
+    tree_rows: int | None = None       # a lone stream's tree rows on one GPU (None: max_rows, as in 0.5.0)
+
     def __init__(self, model_dir: Path, draft_dir: Path | None, *, max_rows: int = 12, tp: int = 1,
                  rank: int = 0, master: str = "", port: int = 29551, split_head: bool = False,
                  tp_draft: bool = False, allow_copy: bool = True, streams: int = 1,
@@ -47,7 +49,7 @@ class Qwen27Engine:
 
         self.torch = torch
         self.tp, self.rank, self.max_rows, self.allow_copy = tp, rank, max_rows, allow_copy
-        self.tree_rows = max_rows if tree_rows is None else min(int(tree_rows), max_rows)   # one GPU, one stream
+        self.tree_rows = None if tree_rows is None else min(int(tree_rows), max_rows)
         self.vision = None
         self.vision_enabled = bool(vision)
         torch.cuda.set_device(0)
