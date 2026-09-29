@@ -274,6 +274,16 @@ def kernel_version(model: Any) -> str:
 CUDA_AFFINE_BITS = (2, 3, 4, 5, 6, 8)
 CUDA_AFFINE_GROUPS = (32, 64, 128)
 
+def gb10() -> bool:
+    """Whether GPU 0 is a GB10 (DGX Spark: compute capability 12.1), where the lone stream's wide windows were measured."""
+
+    import torch
+
+    if not torch.cuda.is_available():
+        return False
+    return tuple(torch.cuda.get_device_capability(0)) == (12, 1) or "GB10" in torch.cuda.get_device_name(0)
+
+
 def cuda_engine(model_dir: str | Path, *, drafter: str = "", tp: int = 1, rank: int = 0, master: str = "",
                 master_port: int = 29551, no_drafts: bool = False, **options: Any):
     """The CUDA engine for ``tensorfold serve``; tp=2 adds fp32 partials in rank order and needs the drafter on both."""
@@ -290,9 +300,9 @@ def cuda_engine(model_dir: str | Path, *, drafter: str = "", tp: int = 1, rank: 
                          "--tp 2), or pass --no-drafts for the serial reference")
     draft = Path(drafter) if drafter and not no_drafts else None
     streams = max(1, int(options.get("parallel") or 1))
-    # one stream on one GPU takes the width the GB10 affords: trees at 16 rows, copies widening to 128 while they
-    # land whole (verify costs 72 ms at 12 rows, 100 at 64); two ranks and concurrent streams keep their 12
-    wide = tp == 1 and streams == 1
+    # one stream on one GB10 takes the width it affords: trees at 16 rows, copies widening to 128 while they land
+    # whole (verify costs 72 ms at 12 rows, 100 at 64); other GPUs, two ranks and concurrent streams keep 12 rows
+    wide = tp == 1 and streams == 1 and gb10()
     return Qwen27Engine(Path(model_dir), draft, max_rows=128 if wide else 12, tree_rows=16 if wide else None,
                         tp=tp, rank=rank, master=master, port=master_port,
                         split_head=tp == 2, tp_draft=tp == 2 and draft is not None, allow_copy=not no_drafts,
