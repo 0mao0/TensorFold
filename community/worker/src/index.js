@@ -212,7 +212,7 @@ export async function handleRequest(request, env) {
   const url = new URL(request.url), path = url.pathname;
   if (['/benchmarks', '/benchmarks/'].includes(path) && request.method === 'GET') return new Response(BOARD_HTML, { headers: {
     ...HEADERS, 'content-type': 'text/html; charset=utf-8',
-    'content-security-policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+    'content-security-policy': "default-src 'none'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
   } });
   if (path === '/benchmarks/app.js' && request.method === 'GET') return new Response(BOARD_JS, { headers: { ...HEADERS, 'content-type': 'text/javascript; charset=utf-8' } });
   if (path === '/benchmarks/protocol.js' && request.method === 'GET') return new Response(BROWSER_PROTOCOL, { headers: { ...HEADERS, 'content-type': 'text/javascript; charset=utf-8' } });
