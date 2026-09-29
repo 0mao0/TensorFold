@@ -207,7 +207,12 @@ def test_no_cuda_engine_serves_one_token_a_round_by_default(tmp_path, monkeypatc
     with pytest.raises(ValueError, match="tensorfold pull z-lab/Qwen3.8-27B-DFlash2"):
         qwen3_5.cuda_engine(tmp_path, drafter="")
     assert qwen3_5.cuda_engine(tmp_path, drafter="", no_drafts=True).allow_copy is False
-    assert qwen3_5.cuda_engine(tmp_path, drafter=str(tmp_path)).max_rows == 12
+    one = qwen3_5.cuda_engine(tmp_path, drafter=str(tmp_path))
+    assert (one.max_rows, one.tree_rows) == (128, 16)          # one stream on one GPU: copies widen, trees at 16
+    many = qwen3_5.cuda_engine(tmp_path, drafter=str(tmp_path), parallel=4)
+    assert (many.max_rows, many.tree_rows) == (12, None)       # concurrent streams keep their rows
+    ranks = qwen3_5.cuda_engine(tmp_path, drafter=str(tmp_path), tp=2, master="192.0.2.10")
+    assert (ranks.max_rows, ranks.tree_rows) == (12, None)     # two ranks too
 
     # Flash Next drafts with the checkpoint's MTP head: a checkpoint without it serves only the serial reference
     index = {"weight_map": {"model.layers.0.mlp.gate.weight": "model.safetensors"}}

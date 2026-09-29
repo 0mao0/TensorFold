@@ -24,7 +24,7 @@ class Qwen27Engine:
                  rank: int = 0, master: str = "", port: int = 29551, split_head: bool = False,
                  tp_draft: bool = False, allow_copy: bool = True, streams: int = 1,
                  context: int | None = None, context_explicit: bool | None = None, vision: bool = False,
-                 vision_urls: bool = False):
+                 vision_urls: bool = False, tree_rows: int | None = None):
         import torch
 
         from tensorfold.cuda.nvfp4.format import is_quantized
@@ -47,6 +47,7 @@ class Qwen27Engine:
 
         self.torch = torch
         self.tp, self.rank, self.max_rows, self.allow_copy = tp, rank, max_rows, allow_copy
+        self.tree_rows = max_rows if tree_rows is None else min(int(tree_rows), max_rows)   # one GPU, one stream
         self.vision = None
         self.vision_enabled = bool(vision)
         torch.cuda.set_device(0)
@@ -217,7 +218,8 @@ class Qwen27Engine:
             return {"prefill_s": prefill_s, "cached": hit[1].pos if hit else 0}
         # the cache holds the state before the last prompt token, not ``st``: the decode may commit into it
         result = draft_decode(self.w, st, prompt, pending, max_tokens, sampling, drafter,
-                              max_rows=self.max_rows, allow_copy=self.allow_copy and draft, stop_eos=stop_eos,
+                              max_rows=self.max_rows, tree_rows=self.tree_rows,
+                              allow_copy=self.allow_copy and draft, stop_eos=stop_eos,
                               on_tokens=on_tokens, inplace=True, **grammar)
         return {"prefill_s": prefill_s, "decode_s": result.seconds, "rounds": result.rounds,
                 "cached": hit[1].pos if hit else 0, "drafts": draft, "min_rows": min(result.widths, default=0),
