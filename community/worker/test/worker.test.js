@@ -126,7 +126,7 @@ test('bounded JSON, origin protection, pagination, static board and fallback rou
   const two = await call(env, base + '/results?limit=2&cursor=' + encodeURIComponent(one.body.next_cursor));
   assert.equal(two.body.results.length, 1); assert.equal(two.body.next_cursor, null);
   assert.equal(new Set([...one.body.results, ...two.body.results].map(r => r.id)).size, 3);
-  const board = await call(env, '/benchmarks'); assert.equal(board.status, 200); assert.match(board.body, /Who's cooking\?/);
+  const board = await call(env, '/benchmarks'); assert.equal(board.status, 200); assert.match(board.body, /<h1>Benchmarks/);
   assert.match(board.headers.get('content-security-policy'), /frame-ancestors 'none'/);
   assert.equal((await call(env, '/')).status, null);
   assert.doesNotThrow(() => new Function(BOARD_JS.replace(/^import[^\n]+\n/, '')));
