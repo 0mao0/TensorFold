@@ -146,10 +146,11 @@ requests go on.
 
 On both backends, `reasoning_effort: none` disables thinking; other effort values enable it and reach the chat
 template. The server also reads it from `chat_template_kwargs.reasoning_effort`, where vLLM's clients send it; the
-top-level field wins. `high` maps to `xhigh`, and `minimal` maps to `low`, unless the template names them.
-A `medium` the template does not name lands on the nearest level it names, the higher when two are as near
-(GLM-5.3 lists `low` and `high`, so `medium` is heard as `high`). `xhigh` stays `xhigh`, and that template renders
-it as Max. An omitted effort stays the template's own Max. An explicit `chat_template_kwargs.enable_thinking` takes
+top-level field wins. An unnamed level maps to the nearest level the template names, and a tie takes
+the higher one. GLM-5.3 lists `low` and `high`, so `medium` is heard as `high` and `minimal` as `low`.
+Qwen3.8 lists `low`, `medium` and `xhigh`, so `high` is heard as `xhigh`. `xhigh` stays `xhigh`, and GLM-5.3
+renders that as Max. `--reasoning-effort` uses the same rule. An omitted effort, with no startup flag, stays
+the template's own default. An explicit `chat_template_kwargs.enable_thinking` takes
 precedence. A request without an effort gets `--reasoning-effort` when the server was started with one; otherwise
 the template renders its own default, as vLLM and mlx-lm render it (Qwen3.8's is `xhigh`, which adds an instruction
 to the system prompt; `medium` adds none). The template hears an effort only while thinking, and both backends render
