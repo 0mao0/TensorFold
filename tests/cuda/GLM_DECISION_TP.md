@@ -12,7 +12,7 @@ conversations, with MTP and DFlash2, at zero and 64 MiB cache budgets. The budge
 is synchronized through the bootstrap store in a test-only engine subclass.
 It also checks that saved MTP prefixes actually resume and DFlash2 falls back.
 
-Verified on both GB10s in `glm53-tf-r0` / `glm53-tf-r1` using an isolated copy
+Verified on both GB10s on rank 0's host and rank 1's host using an isolated copy
 of the PR source, without changing the running production source or restarting
 production. Four single-GPU CUDA cases and all four real two-rank cases passed.
 The checkpoint is synthetic; this is not full-checkpoint EXL3 qualification.
@@ -21,4 +21,4 @@ Production occupied ~110 GiB of 119 GiB unified memory. Normal admission
 correctly refused another model because of its reserve. For these tiny tests
 only, `capacity.available_bytes` was overridden in the test process to 1 GiB;
 the startup estimate was 0.27 GiB per rank. No production admission setting was
-changed. Extension builds used `/cache/pr127_extensions`, not production's cache.
+changed. Extension builds used a scratch cache directory, not production's cache.

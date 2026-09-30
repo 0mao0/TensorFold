@@ -106,6 +106,23 @@ def test_http_decisions_returns_the_scored_body():
     assert "blank" in json.loads(raw)["error"]["message"]
 
 
+def test_http_decision_error_is_400_and_other_failures_are_500():
+    class Client:
+        def decisions(self, body):
+            raise DecisionError("yes is not one token")
+
+    class Broken:
+        def decisions(self, body):
+            raise RuntimeError("engine broke")
+
+    status, raw = post(Client(), _choice(), path="/v1/decisions")
+    assert status == 400
+    assert json.loads(raw)["error"]["message"] == "yes is not one token"
+    status, raw = post(Broken(), _choice(), path="/v1/decisions")
+    assert status == 500
+    assert json.loads(raw)["error"]["message"] == "engine broke"
+
+
 def test_scheduler_scores_on_the_engine_thread():
     class Engine:
         active_count = 0
@@ -385,6 +402,26 @@ def test_cuda_decisions_scores_through_the_template():
     status, raw = _cuda_post(cuda_handler, missing, _choice())
     assert status == 400
     assert "does not score" in raw
+
+
+def test_cuda_decision_error_is_400_and_other_failures_are_500():
+    pytest.importorskip("tokenizers")
+    from tensorfold.cuda.http import make_handler as cuda_handler
+
+    class Client:
+        def decisions(self, body):
+            raise DecisionError("yes is not one token")
+
+    class Broken:
+        def decisions(self, body):
+            raise RuntimeError("engine broke")
+
+    status, raw = _cuda_post(cuda_handler, Client(), _choice())
+    assert status == 400
+    assert json.loads(raw)["error"]["message"] == "yes is not one token"
+    status, raw = _cuda_post(cuda_handler, Broken(), _choice())
+    assert status == 500
+    assert json.loads(raw)["error"]["message"] == "engine broke"
 
 
 def _cuda_post(factory, app, body, path="/v1/decisions"):
