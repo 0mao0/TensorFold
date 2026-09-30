@@ -214,7 +214,7 @@ class ChatApp(RequestOptions, PromptBlocks):
                   flush=True)
 
     def decisions(self, body: dict[str, Any]) -> dict[str, Any]:
-        """Answer typed questions from next-token label logits. No text is generated."""
+        """Answer typed questions from the last row of a prompt-lane prefill. No text is generated."""
 
         from tensorfold.server.decisions import DecisionError, build_response, prepare
 
@@ -223,14 +223,27 @@ class ChatApp(RequestOptions, PromptBlocks):
                 prepared = prepare(self.tokenizer, body, context_len=self.context_window or None)
         except DecisionError as exc:
             raise RequestError(str(exc)) from exc
-        scored = []
+        jobs = []
         for item in prepared:
-            prompt, labels = item.prompt_ids, item.label_ids
-            try:
-                scored.append(self.scheduler.on_engine(
-                    lambda engine, prompt=prompt, labels=labels: engine.score_labels(prompt, labels)))
-            except ValueError as exc:
-                raise RequestError(f"question {item.id!r}: {exc}") from exc
+            job = ChatJob(
+                job_id=f"decision-{uuid.uuid4().hex[:8]}",
+                prompt_ids=list(item.prompt_ids),
+                max_tokens=1,
+                temperature=0.0,
+                drafts=False,
+                label_ids=tuple(item.label_ids),
+            )
+            self.scheduler.submit(job)
+            jobs.append((item, job))
+        scored = []
+        for item, job in jobs:
+            if not job.done.wait(600.0):
+                raise TimeoutError("the engine did not score the prompt in time")
+            if isinstance(job.error, ValueError):
+                raise RequestError(f"question {item.id!r}: {job.error}") from job.error
+            if job.error is not None:
+                raise job.error
+            scored.append(job.scored)
         return build_response(body, prepared, scored)
 
     def chat(

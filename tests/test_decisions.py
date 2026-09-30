@@ -8,7 +8,7 @@ import pytest
 from tensorfold.server.decisions import DecisionError, build_response, prepare, prompts_for, reduce_vocab_shards
 from tensorfold.server.errors import RequestError
 from tensorfold.server.http import make_handler
-from tensorfold.server.scheduler import Scheduler
+from tensorfold.server.scheduler import ChatJob, Scheduler
 from tests.http_fakes import post
 
 
@@ -122,6 +122,89 @@ def test_scheduler_scores_on_the_engine_thread():
         scheduler.stop()
     assert logits == [4.0, 0.0]
     assert logsumexp == 1.0
+
+
+def test_a_decision_fills_beside_a_live_stream():
+    class Engine:
+        active_count = 1
+        prefill_chunks = 0
+        streams: list = []
+        finished_caches: dict = {}
+        round_stats: list = []
+        seen = None
+
+        def prompt_chunks(self, ids):
+            return self
+
+        def floor(self, n):
+            return 0
+
+        def begin_stream(self, stream, **kwargs):
+            self.seen = (self.active_count, tuple(stream.label_ids))
+            stream.finished = True
+            stream.scored = ([4.0, 0.0], 1.0)
+            stream.cached_tokens = 0
+            stream.emitted = []
+            return iter(())
+
+        def step(self):
+            return {}
+
+        def discard_stream(self, stream):
+            pass
+
+    engine = Engine()
+    scheduler = Scheduler(engine, lanes=2, eos_ids=frozenset())
+    scheduler.start()
+    job = ChatJob(job_id="decision-1", prompt_ids=[7, 8], max_tokens=1, temperature=0.0,
+                  drafts=False, label_ids=(4, 5))
+    try:
+        scheduler.submit(job)
+        assert job.done.wait(2.0)
+    finally:
+        scheduler.stop()
+    assert job.error is None
+    assert job.scored == ([4.0, 0.0], 1.0)
+    assert engine.seen == (1, (4, 5))
+
+
+def test_a_decision_prefill_reads_the_last_row_and_draws_nothing():
+    pytest.importorskip("mlx.core")
+    import mlx.core as mx
+
+    from tensorfold.engine.family_prefill import FamilyPrefill, drain
+    from tensorfold.engine.lane_engine import LaneStream
+    from tensorfold.engine.prefill_plan import PromptChunks
+
+    class Engine(FamilyPrefill):
+        streams: list = []
+
+        def prompt_chunks(self, ids):
+            return PromptChunks(None, len(ids), step=max(len(ids), 1))
+
+        def _family_start(self, cache, cached_tokens, chunks):
+            return [], 0
+
+        def _family_feed_steps(self, tokens, cache, chunks, *args, **kwargs):
+            yield from ()
+            return mx.array([[1.0, 3.0, 0.0]])
+
+        def _family_first(self, *args, **kwargs):
+            raise AssertionError("a decision draws no token")
+
+        def copy_single_cache(self, cache):
+            return cache
+
+    engine = Engine()
+    engine.model = type("Model", (), {"head": staticmethod(lambda hidden: hidden)})()
+    stream = LaneStream(stream_id="d", prompt_ids=[7, 8], max_new_tokens=1)
+    stream.label_ids = (0, 1)
+    drain(engine._family_prefill_steps(stream, cache=None, cached_tokens=0, checkpoints_at=()))
+    assert stream.finished
+    assert stream.finish_reason == "decision"
+    assert stream.emitted == []
+    assert stream.scored[0] == pytest.approx([1.0, 3.0])
+    assert stream.scored[1] == pytest.approx(3.0 + math.log(math.exp(-2.0) + 1.0 + math.exp(-3.0)))
 
 
 def test_handler_without_decisions_is_not_found():
