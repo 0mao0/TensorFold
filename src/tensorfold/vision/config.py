@@ -7,7 +7,8 @@ FAMILIES = ('qwen3_5', 'qwen4_exp', 'glm5_next')     # the Qwen3.5/3.8 dense mod
 
 def validate_vision_config(config, family):
     if family not in FAMILIES:
-        raise ValueError('--vision supports GLM-5.3-Flash, Flash Next and Qwen3.5/3.8 dense checkpoints with their vision tower')
+        raise ValueError('--vision supports GLM-5.3-Flash, Flash Next and Qwen3.5/3.8 dense checkpoints '
+                         'with their vision tower')
     vision = config.get('vision_config')
     text = config.get('text_config', config)
     if not isinstance(vision, dict) or not vision:
