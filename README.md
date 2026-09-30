@@ -20,7 +20,8 @@ GPU below its checkpoint's floor at startup.
 
 Install the vision extra, `python -m pip install 'tensorfold[vision] @ git+https://github.com/ashhart/TensorFold.git'`,
 and start a supported GLM-5.3-Flash or Qwen3.5/3.8 dense checkpoint with `--vision` to accept image and text content
-parts through the same lane engine. GLM-5.3-Flash images run on MLX; Qwen's run on MLX and CUDA. See
+parts through the same lane engine; Flash Next CUDA also accepts images with `--vision --parallel 2` or more.
+GLM-5.3-Flash images run on MLX; dense Qwen's run on MLX and CUDA. See
 [image input](docs/vision.md) for the API, checkpoint requirements, cache behavior and qualification status.
 
 ## Models
@@ -102,7 +103,7 @@ between MLX and CUDA, different quantizations, or different tensor-parallel rank
 | --- | --- | --- |
 | `--host`, `--port` | Listen address, default `127.0.0.1:8080` | Both |
 | `--name` | Model ID advertised to clients | Both |
-| `--vision` | Opt-in GLM-5.3-Flash and Qwen3.5/3.8 dense image input | MLX; Qwen also CUDA |
+| `--vision` | Opt-in GLM-5.3-Flash, Qwen3.5/3.8 dense and Flash Next image input | MLX; dense Qwen also CUDA; Flash Next CUDA with `--parallel >=2` |
 | `--alias` | Additional model IDs | MLX |
 | `--context N` | Prompt plus reply capacity | Both |
 | `--max-tokens N` | Default reply limit, 4096 | Both |
