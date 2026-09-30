@@ -1,9 +1,5 @@
-"""``/v1/decisions`` in SGLang prompt-format version 1: one prefill, label logits, no generated text.
-
-The wording, single-token label check and probability math follow
-``sglang.srt.entrypoints.openai.serving_decisions`` (prompt format version 1).
-TensorFold reads the logits from its own prefill instead of SGLang's ``score_prompts``.
-"""
+"""``/v1/decisions`` scores one prefill's label logits and returns no generated text."""
+# Wording and probability math follow SGLang prompt format v1; logits come from this prefill, not score_prompts.
 
 from __future__ import annotations
 
