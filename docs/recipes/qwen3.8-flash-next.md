@@ -87,16 +87,14 @@ tensorfold serve local-inference-lab/Qwen3.8-Flash-Next-NVFP4 --host 0.0.0.0 --p
 | `RadixArk/Qwen3.8-Flash-Next-NVFP4` (`7b719225`) | NVFP4 | bf16 | FP8 rows |
 | `Mia-AiLab/Qwen3.8-Flash-Next-NVFP4` (`925d7be6`), a mirror of local-inference-lab's export | NVFP4 | MXFP8 | MXFP8 rows |
 
-The loader reads each linear by its tensors. An NVFP4 weight is an E2M1 code times its e4m3 scale (a block of 16
-inputs) times the tensor's fp32 `weight_scale_2`; an MXFP8 weight is an e4m3 byte times a power of two (a block of
-32). Both products fit bf16 exactly, so decode multiplies them in bf16 MMAs, adds each block's products times its
-scale in block order and applies the tensor's scale once; the K split depends on the shape alone, so drafted
-windows keep serial decoding's bits. Prompts run the MXFP8 linears on bf16 rows and the stored bytes, each byte
-times its power of two exact in bf16 and one fp32 sum over the inputs (`--prefill-fp8`: the FP8 prompt matmul).
-Tests check the kernels against an fp64 reference built by an independent numpy dequantizer
-(`tensorfold/cuda/nvfp4/format.py`). Both exports store their RMSNorm weights centred (gamma - 1), and the loader
-tells centred from uncentred norms by their stored values. An n-gram table's shards must share one layout, or the
-load stops.
+On one GPU or two ranks, `--parallel N` enables shared forwards for up to N requests, and a stream decoding alone
+replays the one-stream graphs; CUDA `--parallel auto` selects one request. With two ranks, pass the same N on both:
+rank 0 sends each admission, round and completion to rank 1 over one TCP connection on its `--master` address (an
+ephemeral port published through the rendezvous store). Under two-rank `--parallel`, a structured-output request
+(`response_format`, `guided_*`) is refused for now with an HTTP 400 before anything is generated, and Flash Next
+takes text only. The single-request engine retains prompt and reply states for prefix reuse; the concurrent decoder
+retains prompt snapshots per stream. Cache capacity is allocated at startup; inspect the reported capacity rather
+than assuming an older fixed token limit.
 
 Block-scaled FP8 linears (ModelOpt `FP8_PB_WO`, the DeepSeek-style layout: e4m3 bytes and an fp32 `weight_scale_inv`
 per 128x128 block) are read too. Decode keeps the e4m3 bytes in the FP8 GEMM's fragment order and each (64 inputs,
