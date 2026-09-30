@@ -391,8 +391,8 @@ def stream_geometry(t: dict, world: int, streams: int, keep: int, *, first: int 
 
 
 def indexed_stream_geometry(t: dict, streams: int, each: int, keep: int, *, mtp: bool, kv_bits: int = 16,
-                            world: int = 1) -> Geometry:
-    """Flash Next's concurrent decoder on one GPU or as one of ``world`` ranks: ``streams`` slots of ``each``-row windows and kept snapshots."""
+                            first: int = 256, world: int = 1) -> Geometry:
+    """Flash Next's growing stream caches and shared windows on one of ``world`` ranks."""
 
     linear, attention = layer_counts(t)
     d, h, hk, hd, nk, nv, dk, dv, width = _gdn_dims(t, world)

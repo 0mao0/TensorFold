@@ -110,7 +110,7 @@ def choose_gathered(w: Weights, cand_all: torch.Tensor, R: int, positions: Seque
 def choose_gathered_streams(w: Weights, cand_all: torch.Tensor, R: int, starts: Sequence[int],
                             positions: Sequence[Sequence[int]], samplings: Sequence[Sampling | None],
                             with_prob: bool = False):
-    """``choose_gathered`` for several streams in one read-back: stream k's rows [starts[k], starts[k + 1]) draw with its own keyed rule, exactly as it would alone."""
+    """One read-back of gathered rows; each stream samples its own rows with the same keyed rule it uses alone."""
 
     world, width = int(w.meta["world"]), 2 * CAND + 1
     g = cand_all[:world * R * width].view(world, R, width).cpu().numpy()

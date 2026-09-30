@@ -87,14 +87,16 @@ tensorfold serve local-inference-lab/Qwen3.8-Flash-Next-NVFP4 --host 0.0.0.0 --p
 | `RadixArk/Qwen3.8-Flash-Next-NVFP4` (`7b719225`) | NVFP4 | bf16 | FP8 rows |
 | `Mia-AiLab/Qwen3.8-Flash-Next-NVFP4` (`925d7be6`), a mirror of local-inference-lab's export | NVFP4 | MXFP8 | MXFP8 rows |
 
-On one GPU or two ranks, `--parallel N` enables shared forwards for up to N requests, and a stream decoding alone
-replays the one-stream graphs; CUDA `--parallel auto` selects one request. With two ranks, pass the same N on both:
-rank 0 sends each admission, round and completion to rank 1 over one TCP connection on its `--master` address (an
-ephemeral port published through the rendezvous store). Under two-rank `--parallel`, a structured-output request
-(`response_format`, `guided_*`) is refused for now with an HTTP 400 before anything is generated, and Flash Next
-takes text only. The single-request engine retains prompt and reply states for prefix reuse; the concurrent decoder
-retains prompt snapshots per stream. Cache capacity is allocated at startup; inspect the reported capacity rather
-than assuming an older fixed token limit.
+The loader reads each linear by its tensors. An NVFP4 weight is an E2M1 code times its e4m3 scale (a block of 16
+inputs) times the tensor's fp32 `weight_scale_2`; an MXFP8 weight is an e4m3 byte times a power of two (a block of
+32). Both products fit bf16 exactly, so decode multiplies them in bf16 MMAs, adds each block's products times its
+scale in block order and applies the tensor's scale once; the K split depends on the shape alone, so drafted
+windows keep serial decoding's bits. Prompts run the MXFP8 linears on bf16 rows and the stored bytes, each byte
+times its power of two exact in bf16 and one fp32 sum over the inputs (`--prefill-fp8`: the FP8 prompt matmul).
+Tests check the kernels against an fp64 reference built by an independent numpy dequantizer
+(`tensorfold/cuda/nvfp4/format.py`). Both exports store their RMSNorm weights centred (gamma - 1), and the loader
+tells centred from uncentred norms by their stored values. An n-gram table's shards must share one layout, or the
+load stops.
 
 Block-scaled FP8 linears (ModelOpt `FP8_PB_WO`, the DeepSeek-style layout: e4m3 bytes and an fp32 `weight_scale_inv`
 per 128x128 block) are read too. Decode keeps the e4m3 bytes in the FP8 GEMM's fragment order and each (64 inputs,
@@ -263,13 +265,16 @@ The default CUDA cap is six MTP drafts, with chains stopping below the configure
 Single-request serving uses CUDA graphs for verify windows and draft steps. Two-rank reductions add
 gathered partials in rank order.
 
-With one GPU, `--parallel N` enables eager shared forwards for up to N requests; CUDA
-`--parallel auto` selects one request. Two ranks serve one request at a time and reject `--parallel N`
-when N exceeds one. For prefix reuse, the single-request engine and the concurrent decoder keep prompt
+On one GPU or two ranks, `--parallel N` shares forwards across up to N requests, with a lone stream on CUDA graphs
+where its weights support capture; `--parallel auto` selects one request. Pass the same N on both ranks: rank 0 sends
+admissions, prompt pieces, cache growth and rounds over one TCP connection on its `--master` address, with an
+ephemeral port published by the rendezvous store. Two-rank parallel requests take text without structured output;
+`response_format` and `guided_*` receive HTTP 400 before generation. For prefix reuse, the single-request engine
+and the concurrent decoder keep prompt
 states; a follow-up prefills the reply again. A kept state stops one token before its prompt's end, so the
 same prompt sent again resumes, and so does a next chat turn that renders the generation prompt's `<think>`
-and newline as `<think>` and two newlines. Cache capacity is allocated at startup; inspect the reported
-capacity rather than assuming an older fixed token limit.
+and newline as `<think>` and two newlines. Stream caches grow within the startup window as memory allows;
+inspect the reported capacity.
 
 With `--parallel N`, a prompt prefills inside the rounds: each round runs the live replies' windows and the next
 prompt pass (up to 2,048 rows, several prompts packed) in one forward, and each layer's experts once for both. Every
