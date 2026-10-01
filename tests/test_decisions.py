@@ -224,6 +224,84 @@ def test_a_decision_prefill_reads_the_last_row_and_draws_nothing():
     assert stream.scored[1] == pytest.approx(3.0 + math.log(math.exp(-2.0) + 1.0 + math.exp(-3.0)))
 
 
+class _KeepTokenizer:
+    """One character a token, with a generation suffix a history boundary can sit in front of."""
+
+    def encode(self, text, add_special_tokens=False):
+        return [ord(char) for char in text]
+
+    def decode(self, ids):
+        return "".join(chr(int(token)) for token in ids)
+
+    def apply_chat_template(self, messages, **kwargs):
+        body = "\n".join(str(message.get("content", "")) for message in messages)
+        text = f"<u>{body}</u>"
+        if kwargs.get("add_generation_prompt", True):
+            text += "<a>"
+        if kwargs.get("tokenize", True) is False:
+            return text
+        return self.encode(text)
+
+
+def _long_choice(question: str) -> dict:
+    return {
+        "input": "a" * 600,
+        "questions": [{
+            "id": "q",
+            "type": "choice",
+            "question": question,
+            "options": [{"name": "one"}, {"name": "two"}],
+        }],
+        "return_prompt_token_ids": True,
+    }
+
+
+def test_a_decision_keeps_a_shared_input_and_a_later_chat_resumes_it():
+    pytest.importorskip("mlx.core")
+    from tensorfold.engine.prefill_plan import PrefillPlan
+    from tests.lane_fakes import FakeEngine
+    from tests.test_lane_server import make_app
+
+    class GridEngine(FakeEngine):
+        def __init__(self, model=None, **kwargs):
+            super().__init__(model, **kwargs)
+            self.prefill_plan = PrefillPlan(128)
+
+    def open_app():
+        return make_app(engine_factory=GridEngine, checkpoint_slots=8, lanes=1, tokenizer=_KeepTokenizer())
+
+    fresh = open_app()
+    resume = open_app()
+    chat_fresh = open_app()
+    try:
+        cold = fresh.decisions(_long_choice("North stair."))
+        cold_ids = cold["answers"]["q"]["prompt_token_ids"]
+        assert fresh.engine.prefill_calls[-1][1] == 0
+        other = resume.decisions(_long_choice("South stair."))
+        other_ids = other["answers"]["q"]["prompt_token_ids"]
+        warm = resume.decisions(_long_choice("North stair."))
+        warm_ids = warm["answers"]["q"]["prompt_token_ids"]
+        cached = resume.engine.prefill_calls[-1][1]
+        split = next(i for i, (left, right) in enumerate(zip(other_ids, warm_ids)) if left != right)
+        assert warm_ids == cold_ids
+        assert 0 < cached < split
+        assert split - cached <= 128
+        assert warm["answers"]["q"]["probabilities"] == cold["answers"]["q"]["probabilities"]
+        assert warm["answers"]["q"]["label_mass"] == cold["answers"]["q"]["label_mass"]
+        pinned = [len(entry.tokens) for entry in resume.checkpoints._entries if entry.pinned]
+        assert cached in pinned
+        messages = [{"role": "user", "content": ("a" * 600) + "\n\nSay ready."}]
+        resumed_chat = resume.chat(messages, max_tokens=4, sampling={"draft": False, "enable_thinking": False})
+        fresh_chat = chat_fresh.chat(messages, max_tokens=4, sampling={"draft": False, "enable_thinking": False})
+        assert resumed_chat["cached_tokens"] == cached
+        assert resumed_chat["runtime"]["token_sha"] == fresh_chat["runtime"]["token_sha"]
+        assert fresh_chat["cached_tokens"] == 0
+    finally:
+        fresh.close()
+        resume.close()
+        chat_fresh.close()
+
+
 def test_handler_without_decisions_is_not_found():
     class App:
         served_name = "qwen"
