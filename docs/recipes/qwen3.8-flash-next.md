@@ -377,4 +377,6 @@ TBD [release-0.3.5].
 
 ## Image input on CUDA
 
-Use `--vision` on one CUDA GPU with `--parallel` of at least two. Image requests always prefill fresh; text prefix caching remains available. See the [image recipe](flash-next-vision.md) for tower weights, memory admission, EXL3 sidecar conversion and verification.
+Use `--vision` on one CUDA GPU with `--parallel` of at least two. Image requests always prefill fresh; text prefix
+caching remains available. See the [image recipe](flash-next-vision.md) for tower weights, memory admission, EXL3
+sidecar conversion and verification.
