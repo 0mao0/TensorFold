@@ -243,6 +243,10 @@ class ChatApp(RequestOptions, PromptBlocks):
                 raise RequestError(f"question {item.id!r}: {job.error}") from job.error
             if job.error is not None:
                 raise job.error
+            logits, total = job.scored
+            shown = ",".join(repr(value) for value in logits)
+            print(f"[tensorfold] decision {job.job_id} cached={job.cached_tokens} "
+                  f"logits={shown} logsumexp={total!r}", flush=True)
             scored.append(job.scored)
         return build_response(body, prepared, scored)
 
