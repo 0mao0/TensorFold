@@ -41,6 +41,9 @@ def check(args: argparse.Namespace, family: Any, backend: str, config_dir: Any =
         validate_vision_config(read_config(config_dir) if config_dir else {}, family.model_type)
         if family.model_type == "qwen4_exp" and backend != "cuda":
             raise ValueError("--vision for Flash Next runs on the CUDA engine; the MLX path has no image tower yet")
+        if family.model_type == "qwen3_5_moe" and backend != "cuda":
+            raise ValueError("--vision for Qwen3.6 MoE runs on the CUDA engine; the MLX path has no image wiring "
+                             "for this family yet")
     share = getattr(args, "decode_share", None)
     if share is not None and backend == "cuda" and not getattr(family.package, "CUDA_DECODE_SHARE", False):
         raise ValueError("--decode-share sets the Mac server's share, and Flash Next's on CUDA; this CUDA engine runs "

@@ -44,11 +44,12 @@ class MultiDecoder:
     """The ``Scheduler``'s decoder: a prefill step, then every stream's window (16 rows at most) in one forward; a lone stream replays ``graphs``."""
 
     def __init__(self, w, head: Head | None, *, depth: int, confidence: float, context: int = 0, keep: int = 3,
-                 points=None, graphs=None) -> None:
+                 points=None, graphs=None, vision=None) -> None:
         if head is not None and depth > 0 and not 1 <= depth <= 15:
             raise ValueError(f"MTP drafts a round with --parallel: 1 to 15 (a window holds 16 rows), not {depth}")
         self.w, self.head = w, head if depth > 0 else None
         self.depth, self.confidence = int(depth), float(confidence)
+        self.vision = vision                         # the image tower, or None: an image stream's ``vision`` is its encoding
         self.context = context                       # prompt, reply and draft slots a stream holds (0: no bound)
         self.eos = tuple(w.config.eos)
         self.ids = head.ids.cpu().numpy() if self.head is not None and head.ids is not None else None
@@ -74,7 +75,11 @@ class MultiDecoder:
                                  "context (--context)")
             s.count = min(s.count, room)
         drafting = s.draft and self.head is not None
-        hit = self.cache.longest(s.prompt) if drafting else None
+        prepared = getattr(s, "vision", None)
+        if prepared is not None and self.vision is None:
+            raise ValueError("image inputs require starting this engine with --vision")
+        s.vision = self.vision.encode(prepared, s.prompt) if prepared is not None else None
+        hit = self.cache.longest(s.prompt) if drafting and s.vision is None else None
         need = len(s.prompt) + s.count                # the most the stream's attention caches ever hold
         s.st = private(hit[1] if hit else State(self.w), need)
         s.snap = None
@@ -84,7 +89,7 @@ class MultiDecoder:
         s.sid, s.cached = self.next_id, len(hit[0]) if hit else 0
         self.next_id += 1
         s.stops = ([p for p in self.points(s.prompt) if p >= s.st.pos + MIN_GAP]
-                   if self.points is not None and drafting else [])
+                   if self.points is not None and drafting and s.vision is None else [])   # image prompts keep none
         self.filling.append(s)
 
     def _fill(self) -> list[Stream]:
@@ -115,7 +120,7 @@ class MultiDecoder:
 
         t0 = time.perf_counter()
         d: Drafts | None = s.snap
-        end = (entry_end(s.prompt) if d is not None and not
+        end = (entry_end(s.prompt) if d is not None and s.vision is None and not
                (s.stops and len(s.prompt) - s.stops[-1] < MIN_GAP) else None)
 
         def keep(point, state, cache, held):
@@ -124,7 +129,7 @@ class MultiDecoder:
         try:
             normed, held = extend(self.w, self.head if d is not None else None, s.prompt, s.st,
                                   d.cache if d is not None else None, d.carry.states if d is not None else None, stop,
-                                  keep_at=end, keep=keep if end is not None else None)
+                                  keep_at=end, keep=keep if end is not None else None, vision=s.vision)
             if d is not None:
                 d.carry = Carry(held, [])
             if stop in s.stops:

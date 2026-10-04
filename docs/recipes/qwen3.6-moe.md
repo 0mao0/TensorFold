@@ -113,6 +113,23 @@ Every reply's token SHA-256 is the same at each N and with `"draft": false`. The
 so copied continuations keep 9.3 tokens a round per stream; chats keep 2.9. One client at a time gets 912 tok/s
 on the label requests at `--parallel 8`, as a lone stream replays the graphs.
 
+## Image input
+
+CUDA takes images with the vision extra and `--vision`; the checkpoint must be the complete multimodal conversion
+(the published one carries its 0.83 GiB BF16 vision tower beside the quantized language weights).
+
+```bash
+python -m pip install 'tensorfold[vision] @ git+https://github.com/ashhart/TensorFold.git'
+tensorfold serve TensorFold/Qwen3.6-35B-A3B-MLX-4bit-MTP --vision
+```
+
+Images ride the same prefill, 4,096 visual tokens each (4,096 shared by default, `--vision-image-tokens` up to
+65,536); no other flag changes, and one CUDA GPU serves them with or without `--parallel`. An image prompt keeps
+no prompt-end states and resumes no cached prefix, and its rows go through the same verify rounds: on one DGX
+Spark a test card's 200-token reply has the same token SHA-256 whether it was drafted or `"draft": false`. The
+tower encodes a 480x200 test card and its 127-token prompt prefills in 0.25-0.75 s steady state; the first image
+request pays the tower's kernel warmup.
+
 ## Measurements
 
 One DGX Spark (GB10) in NVIDIA's `pytorch:26.07-py3` container, checkpoint revision 81169a9, against vLLM serving

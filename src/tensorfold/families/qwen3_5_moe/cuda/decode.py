@@ -90,7 +90,8 @@ def picks(logits: torch.Tensor, positions: Sequence[int], samplings: Sequence[Sa
 def prefill(w, head: Head | None, prompt: Sequence[int], sampling: Sampling | None, *,
             state: State | None = None, cache: Cache | None = None, held: torch.Tensor | None = None,
             stops: Sequence[int] = (), keep: Callable | None = None,
-            constraint=None, keep_at: int | None = None) -> tuple[State, Cache | None, int, Carry | None]:
+            constraint=None, keep_at: int | None = None,
+            vision=None) -> tuple[State, Cache | None, int, Carry | None]:
     """Commit the prompt, sample its next token, absorb all prompt rows but the last into the head; ``keep(p, ...)`` gets each stop's state."""
 
     st = clone_state(state) if state is not None else State(w)
@@ -98,6 +99,8 @@ def prefill(w, head: Head | None, prompt: Sequence[int], sampling: Sampling | No
         raise ValueError("a reused state must leave at least one prompt token to process")
     if keep_at is not None and (keep is None or not st.pos <= keep_at <= len(prompt)):
         raise ValueError("keep_at needs a callback and a point in the prefilled range")
+    if vision is not None and stops:
+        raise ValueError("an image prompt keeps no prompt states")
     mc = None
     if head is not None:
         mc = cache.view(len(prompt)) if cache is not None else Cache(w, len(prompt))      # the prompt's rows only
@@ -105,7 +108,7 @@ def prefill(w, head: Head | None, prompt: Sequence[int], sampling: Sampling | No
     bounds = sorted({p for p in stops if st.pos < p < len(prompt)} | {len(prompt)}) if keep is not None else \
         [len(prompt)]
     for end in bounds:
-        normed, held = extend(w, head, prompt, st, mc, held, end, keep_at=keep_at, keep=keep)
+        normed, held = extend(w, head, prompt, st, mc, held, end, keep_at=keep_at, keep=keep, vision=vision)
         if end < len(prompt):
             keep(end, clone_state(st), mc.view() if mc is not None else None, held)
     logits = _mm(normed[-1:], w.head)
@@ -120,10 +123,14 @@ def prefill(w, head: Head | None, prompt: Sequence[int], sampling: Sampling | No
 
 @torch.no_grad()
 def extend(w, head: Head | None, prompt: Sequence[int], st: State, mc: Cache | None, held: torch.Tensor | None,
-           end: int, *, keep_at: int | None = None, keep: Callable | None = None
+           end: int, *, keep_at: int | None = None, keep: Callable | None = None, vision=None
            ) -> tuple[torch.Tensor, torch.Tensor | None]:
     """Commit prompt[st.pos:end] in chunks (bits independent of ``end``); the head absorbs every row but the last, returned held."""
 
+    if vision is not None:                    # a later step goes on with the rope its first step set (no resumption)
+        if st.pos and getattr(st, "rope_delta", None) is not vision.rope_delta:
+            raise ValueError("image prompts require a fresh prefill state")
+        st.rope_delta = vision.rope_delta
     ids = torch.tensor(list(prompt[st.pos:end]), dtype=torch.int32, device=w.norm.device)
     base, normed = st.pos, None
     saved = False
@@ -133,7 +140,7 @@ def extend(w, head: Head | None, prompt: Sequence[int], st: State, mc: Cache | N
                  held.clone() if held is not None else None)
             saved = True
         cut = keep_at - a if keep_at is not None and a < keep_at < b else 0
-        normed, _, *part = prefill_chunk(w, ids[a - base:b - base], st, every=head is not None, cut=cut)
+        normed, _, *part = prefill_chunk(w, ids[a - base:b - base], st, every=head is not None, cut=cut, vision=vision)
         if head is not None:
             rows = normed if held is None else torch.cat([held, normed])
             start = a - (0 if held is None else 1)

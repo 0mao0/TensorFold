@@ -1,6 +1,6 @@
 # Image input
 
-The opt-in `--vision` flag accepts image and text content parts through the existing OpenAI-compatible chat API. It supports GLM-5.3-Flash on MLX and Qwen3.5/3.8 dense checkpoints on MLX and CUDA. Image features enter the existing model's prompt prefill; generated text still uses that family's normal decoder and speculative path.
+The opt-in `--vision` flag accepts image and text content parts through the existing OpenAI-compatible chat API. It supports GLM-5.3-Flash on MLX, Qwen3.5/3.8 dense checkpoints on MLX and CUDA, and Qwen3.6 MoE checkpoints on CUDA. Image features enter the existing model's prompt prefill; generated text still uses that family's normal decoder and speculative path.
 The checkpoint must contain its vision tower, tokenizer, processor files and vision configuration; text-only conversions cannot recover image support from a flag. GLM-5.3-Flash uses its own GLM5-Next image processor and tower while sharing TensorFold's already-loaded language model and MTP head.
 Video, audio and image generation are not supported by this adapter.
 Qwen3.8 Flash Next supports images on one CUDA GPU with `--parallel` of at least two; see the
@@ -22,7 +22,8 @@ On a small CUDA card the resident tower and its 4 GiB workspace reserve take a l
 MLX also reads per-module quantized tower weights when the checkpoint declares their format.
 The tower shares the server process and the existing language model's embeddings; it does not load a second language model.
 Dense Qwen CUDA two-rank mode encodes images on rank zero and sends their features and positions to rank one.
-Use the model and drafter prerequisites from the [Qwen recipe](recipes/qwen3.8-27b.md) or [GLM recipe](recipes/glm-5.3-flash.md).
+Qwen3.6 MoE takes images on one CUDA GPU, with or without MTP drafting and at any `--parallel`; an image prompt keeps no prompt-end states and prefills in its own turn, so text streams are not slowed by its rows.
+Use the model and drafter prerequisites from the [Qwen recipe](recipes/qwen3.8-27b.md), the [Qwen3.6 MoE recipe](recipes/qwen3.6-moe.md) or the [GLM recipe](recipes/glm-5.3-flash.md).
 GLM derivatives may retain selected BF16 attention output projections, including the MTP layer; these use the existing dense projection path alongside the quantized weights.
 
 ## Send an image

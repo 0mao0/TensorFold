@@ -158,12 +158,13 @@ class Staged:
     host: torch.Tensor
     dev: torch.Tensor
 
-    def refresh(self, tokens: Sequence[int], p: int) -> None:
-        """This round's tokens at positions [p, p + width) (the host mirror, then one copy)."""
+    def refresh(self, tokens: Sequence[int], p: int, rope: int | None = None) -> None:
+        """This round's tokens at positions [p, p + width) (the host mirror, then one copy); ``rope``: the rotary positions' base, off the committed count on an image prompt."""
 
         w, h = self.width, self.host.numpy()
+        base = p if rope is None else rope
         h[:w] = tokens
-        h[w:2 * w] = np.arange(p, p + w)
+        h[w:2 * w] = np.arange(base, base + w)
         h[2 * w + w + 2] = p                                 # the attention stream's committed keys and slots
         h[2 * w + w + 3] = tree_attention.slots(p, w)
         self.dev.copy_(self.host, non_blocking=True)

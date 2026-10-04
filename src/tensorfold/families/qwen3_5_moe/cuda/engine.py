@@ -45,19 +45,22 @@ class Qwen36Engine:
     """``eos``, ``generate`` and ``context_window`` for ``tensorfold.cuda.server``; ``streams`` > 1 decodes that many requests together."""
 
     def __init__(self, model_dir: Path, *, depth: int = DEPTH, confidence: float = CONFIDENCE,
-                 context: int | None = None, context_explicit: bool | None = None, streams: int = 1) -> None:
+                 context: int | None = None, context_explicit: bool | None = None, streams: int = 1,
+                 vision: bool = False, vision_urls: bool = False, vision_offload: bool = False) -> None:
         import torch
 
         from tensorfold.cuda.capacity import admit
         from tensorfold.cuda.geometry import gdn_geometry, linear_weights
         from tensorfold.cuda.markers import resume_points
         from tensorfold.cuda.streams import PrefixCache
+        from tensorfold.vision.qwen_cuda import capacity_geometry, weight_transform as vision_weights
 
         from .mtp import Head
         from .weights import MTP_FILE, load, load_mtp
 
         torch.cuda.set_device(0)
         self.depth, self.confidence = int(depth), float(confidence)
+        self.vision = None                   # the image tower (``QwenCudaVision``) with --vision
         many = streams > 1
         if many:             # streams' caches of many sizes come and go: growable segments, less slack
             torch.cuda.memory._set_allocator_settings("expandable_segments:True")
@@ -65,9 +68,11 @@ class Qwen36Engine:
         # one admission for one stream or many (every stream's states and caches, kept prompt ends), before any load
         geometry = ((lambda text: stream_geometry(text, streams, KEEP_MANY, self.depth)) if many else
                     (lambda text: gdn_geometry(text, 1, self.depth + 1, mtp=self.depth > 0)))
-        self.capacity_plan = admit(model_dir, context, context_explicit, torch, geometry,
-                                   lambda name, info: (mtp_weights(name, info) if ".mtp." in name
-                                                       else linear_weights(name, info)),
+        transform = lambda name, info: (mtp_weights(name, info) if ".mtp." in name               # noqa: E731
+                                        else linear_weights(name, info))
+        self.capacity_plan = admit(model_dir, context, context_explicit, torch,
+                                   capacity_geometry(geometry, model_dir, vision, 0, offload=vision_offload),
+                                   vision_weights(transform, vision, 0, vision_offload),
                                    extra_files=extra)
         self.context_window = self.capacity_plan["context_window"]
         self.w = load(model_dir)
@@ -84,6 +89,13 @@ class Qwen36Engine:
 
             # decoding buffers that outlive requests (with --parallel, the one stream decoding alone's)
             self.graphs = Graphs(self.w, self.head, self.context_window + self.depth + 1)
+        if vision:
+            from tensorfold.vision.qwen_cuda import QwenCudaVision
+
+            self.vision = QwenCudaVision(model_dir, self.w.norm.device, allow_urls=vision_urls,
+                                         offload=vision_offload)
+            print(f"[tensorfold] vision: image input, a {self.vision.weight_bytes / 2**30:.2f} GiB tower"
+                  f"{'; https URLs allowed' if vision_urls else ''}", flush=True)
         torch.cuda.empty_cache()
         self.eos = tuple(self.w.config.eos)
         self.points = resume_points(model_dir)
@@ -98,7 +110,7 @@ class Qwen36Engine:
 
             self.multi = MultiDecoder(self.w, self.head, depth=self.depth, confidence=self.confidence,
                                       context=self.capacity_plan["cache_slots"], keep=KEEP_MANY, points=self.points,
-                                      graphs=self.graphs)
+                                      graphs=self.graphs, vision=self.vision)
             started = time.perf_counter()
             self.multi.warm(streams)
             print(f"[tensorfold] {streams} streams of {self.context_window} prompt/reply tokens: together, rounds run "
@@ -123,7 +135,7 @@ class Qwen36Engine:
 
     def generate(self, prompt: list[int], max_tokens: int, sampling, on_tokens: Callable[[list[int]], bool | None],
                  draft: bool = True, stop_eos: bool = True, constraint=None,
-                 background: bool = False) -> dict[str, Any]:
+                 background: bool = False, vision=None) -> dict[str, Any]:
         """``draft=False``: serial re-runs, no drafts; ``background``: last under ``--parallel``, yielding a lane."""
 
         from tensorfold.families.qwen3_5.cuda.decode import draft_decode, prefill as serial_prefill
@@ -133,6 +145,8 @@ class Qwen36Engine:
 
         from .decode import mtp_decode, prefill
 
+        if vision is not None and self.vision is None:
+            raise ValueError("image inputs require starting this engine with --vision")
         if len(prompt) >= self.context_window:
             raise ValueError(f"prompt of {len(prompt)} tokens exceeds the {self.context_window}-token safe capacity; "
                              "shorten the prompt or reserve fewer reply tokens")
@@ -140,10 +154,12 @@ class Qwen36Engine:
         grammar = {} if constraint is None else {"constraint": constraint}     # a plain request calls as before
         if self.scheduler is not None:
             return self.scheduler.submit(list(prompt), max_tokens, sampling, draft, on_tokens, stop_eos=stop_eos,
-                                         **grammar, **({"background": True} if background else {}))
+                                         vision=vision, **grammar,
+                                         **({"background": True} if background else {}))
         t0 = time.perf_counter()
+        encoded = self.vision.encode(vision, prompt) if vision is not None else None
         if not draft or self.head is None:
-            st, first = serial_prefill(self.w, prompt, sampling, **grammar)
+            st, first = serial_prefill(self.w, prompt, sampling, vision=encoded, **grammar)
             stats: dict[str, Any] = {"prefill_s": round(time.perf_counter() - t0, 4), "cached": 0, "drafts": False}
             if on_tokens([first]) or (stop_eos and first in self.eos) or max_tokens <= 1:
                 return stats
@@ -151,14 +167,15 @@ class Qwen36Engine:
                                stop_eos=stop_eos, on_tokens=on_tokens, **grammar)
             stats.update(decode_s=round(res.seconds, 4), rounds=res.rounds, min_rows=min(res.widths, default=0))
             return stats
-        hit = self._resume(prompt)
-        stops = [p for p in (self.points(prompt) if self.points is not None else [])
-                 if p >= (len(hit[0]) if hit else 0) + MIN_GAP]
+        hit = self._resume(prompt) if encoded is None else None
+        stops = ([p for p in (self.points(prompt) if self.points is not None else [])
+                  if p >= (len(hit[0]) if hit else 0) + MIN_GAP] if encoded is None else [])   # image prompts keep none
         keep = lambda p, st, mc, held: self.cache.add(list(prompt[:p]), st, (mc, held))       # noqa: E731
-        end = None if stops and len(prompt) - stops[-1] < MIN_GAP else entry_end(prompt)
+        end = None if (encoded is not None or (stops and len(prompt) - stops[-1] < MIN_GAP)) else entry_end(prompt)
         st, mc, first, carry = prefill(self.w, self.head, prompt, sampling,
                                        state=hit[1] if hit else None, cache=hit[2][0] if hit else None,
-                                       held=hit[2][1] if hit else None, stops=stops, keep=keep, keep_at=end, **grammar)
+                                       held=hit[2][1] if hit else None, stops=stops, keep=keep, keep_at=end,
+                                       vision=encoded, **grammar)
         stats = {"prefill_s": round(time.perf_counter() - t0, 4), "cached": len(hit[0]) if hit else 0,
                  "drafts": True}
         if on_tokens([first]) or (stop_eos and first in self.eos) or max_tokens <= 1:
